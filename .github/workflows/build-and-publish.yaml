@@ -31,7 +31,7 @@ jobs:
         # if: startsWith('redhat-', env.GITHUB_REF)
         run: |
           BRANCH_NAME=redhat-${GITHUB_REF#refs/heads/}
-          echo ${BRANCH_NAME/redhat-/}
+          echo ${BRANCH_NAME/redhat-build/}
 
           # - name: Build and push
           #   id: docker_build

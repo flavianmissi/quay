@@ -28,9 +28,9 @@ jobs:
         run: echo ${GITHUB_REF#refs/heads/}
 
       - name: format tag from branch
-        if: startsWith('redhat-', env.GITHUB_REF)
+        # if: startsWith('redhat-', env.GITHUB_REF)
         run: |
-          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          BRANCH_NAME=redhat-${GITHUB_REF#refs/heads/}
           echo ${BRANCH_NAME/redhat-/}
 
           # - name: Build and push

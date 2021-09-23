@@ -4,7 +4,9 @@ name: Build and Publish Images
 on:
   push:
     branches:
+      - redhat-3.4
       - redhat-3.5
+      - redhat-3.6
       - build-release-branch
 
 jobs:
@@ -24,6 +26,12 @@ jobs:
 
       - name: branch name
         run: echo ${GITHUB_REF#refs/heads/}
+
+      - name: format tag from branch
+        if: startsWith('redhat-', env.GITHUB_REF)
+        run: |
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          echo ${BRANCH_NAME/redhat-/}
 
           # - name: Build and push
           #   id: docker_build

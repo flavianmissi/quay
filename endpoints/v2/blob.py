@@ -38,6 +38,7 @@ from endpoints.v2.errors import (
     InvalidRequest,
     BlobDownloadGeoBlocked,
 )
+from endpoints.v2.proxy import setup_proxy, ProxyNotSupported
 from util.cache import cache_control
 from util.names import parse_namespace_repository
 from util.request import get_request_ip
@@ -62,6 +63,12 @@ def check_blob_exists(namespace_name, repo_name, digest):
     # Find the blob.
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
     if blob is None:
+        try:
+            proxy = setup_proxy(namespace_name, repo_name)
+            resp = proxy.blob_exists(digest)
+            return Response(**resp)
+        except ProxyNotSupported as e:
+            logger.debug(f"Skipping pull through proxy cache: {e}")
         raise BlobUnknown()
 
     # Build the response headers.
@@ -91,6 +98,13 @@ def download_blob(namespace_name, repo_name, digest):
     # Find the blob.
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
     if blob is None:
+        try:
+            proxy = setup_proxy(namespace_name, repo_name)
+            media_type = request.headers.get("Accept", None)
+            resp = proxy.get_blob(digest, media_type)
+            return Response(**resp)
+        except ProxyNotSupported as e:
+            logger.debug(f"Skipping pull through proxy cache: {e}")
         raise BlobUnknown()
 
     # Build the response headers.

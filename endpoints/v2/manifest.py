@@ -3,6 +3,7 @@ import logging
 from functools import wraps
 
 from flask import request, url_for, Response
+from flask.views import MethodView
 
 import features
 
@@ -28,6 +29,7 @@ from endpoints.v2.errors import (
     TagExpired,
     NameUnknown,
 )
+from endpoints.v2.proxy import setup_proxy, ProxyNotSupported
 from image.shared import ManifestException
 from image.shared.schemas import parse_manifest_from_bytes
 from image.docker.schema1 import DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE, DOCKER_SCHEMA1_CONTENT_TYPES
@@ -54,6 +56,14 @@ MANIFEST_TAGNAME_ROUTE = BASE_MANIFEST_ROUTE.format(VALID_TAG_PATTERN)
 @require_repo_read
 @anon_protect
 def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
+    try:
+        proxy = setup_proxy(namespace_name, repo_name)
+        media_type = request.headers.get("Accept", None)
+        resp = proxy.get_manifest(manifest_ref, media_type)
+        return Response(**resp)
+    except ProxyNotSupported as e:
+        logger.debug(f"Skipping pull through proxy cache: {e}")
+
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
         image_pulls.labels("v2", "tag", 404).inc()
@@ -113,6 +123,14 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
 @require_repo_read
 @anon_protect
 def fetch_manifest_by_digest(namespace_name, repo_name, manifest_ref):
+    try:
+        proxy = setup_proxy(namespace_name, repo_name)
+        media_type = request.headers.get("Accept", None)
+        resp = proxy.get_manifest(manifest_ref, media_type)
+        return Response(**resp)
+    except ProxyNotSupported as e:
+        logger.debug(f"Skipping pull through proxy cache: {e}")
+
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
         image_pulls.labels("v2", "manifest", 404).inc()
@@ -228,7 +246,7 @@ def _doesnt_accept_schema_v1():
 @anon_protect
 @check_readonly
 def write_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
-    parsed = _parse_manifest()
+    parsed = _parse_manifest(request.content_type, request.data)
     return _write_manifest_and_log(namespace_name, repo_name, manifest_ref, parsed)
 
 
@@ -241,7 +259,7 @@ def write_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
 @anon_protect
 @check_readonly
 def write_manifest_by_digest(namespace_name, repo_name, manifest_ref):
-    parsed = _parse_manifest()
+    parsed = _parse_manifest(request.content_type, request.data)
     if parsed.digest != manifest_ref:
         image_pushes.labels("v2", 400, "").inc()
         raise ManifestInvalid(detail={"message": "manifest digest mismatch"})
@@ -280,14 +298,14 @@ def write_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     )
 
 
-def _parse_manifest():
-    content_type = request.content_type or DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE
+def _parse_manifest(content_type, request_data):
+    content_type = content_type or DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE
     if content_type == "application/json":
         # For back-compat.
         content_type = DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE
 
     try:
-        return parse_manifest_from_bytes(Bytes.for_string_or_unicode(request.data), content_type)
+        return parse_manifest_from_bytes(Bytes.for_string_or_unicode(request_data), content_type)
     except ManifestException as me:
         logger.exception("failed to parse manifest when writing by tagname")
         raise ManifestInvalid(detail={"message": "failed to parse manifest: %s" % me})

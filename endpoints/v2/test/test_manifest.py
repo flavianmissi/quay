@@ -27,6 +27,174 @@ class TestManifestPullThroughProxy(unittest.TestCase):
     context = None
     subject = None
 
+    def setup(self, client, app):
+        self.client = client
+        realapp.config.update({"FEATURE_PROXY_CACHE": True})
+        app.config.update({"FEATURE_PROXY_CACHE": True})
+
+        self.user = model.user.get_user("devtable")
+        context, subject = build_context_and_subject(ValidatedAuthContext(user=self.user))
+        self.context = context
+        self.subject = subject
+
+        try:
+            model.organization.get(self.org)
+        except Exception:
+            org = model.organization.create_organization(self.org, "cache@devtable.com", self.user)
+            org.save()
+
+        try:
+            model.organization.get(self.org2)
+        except Exception:
+            org = model.organization.create_organization(
+                self.org2,
+                "cache-library@devtable.com",
+                self.user,
+            )
+            org.stripe_id = TEST_STRIPE_ID
+            org.save()
+
+        try:
+            model.proxy_cache.get_proxy_cache_config_for_org(self.org)
+        except Exception:
+            model.proxy_cache.create_proxy_cache_config(
+                org_name=self.org,
+                upstream_registry=self.registry,
+                staleness_period_s=3600,
+            )
+
+        try:
+            model.proxy_cache.get_proxy_cache_config_for_org(self.org2)
+        except Exception:
+            model.proxy_cache.create_proxy_cache_config(
+                org_name=self.org2,
+                upstream_registry=self.registry + "/library",
+                staleness_period_s=3600,
+            )
+
+    def _get_auth_headers(self, repository):
+        access = [
+            {
+                "type": "repository",
+                "name": repository,
+                "actions": ["pull"],
+            }
+        ]
+        token = generate_bearer_token(
+            realapp.config["SERVER_HOSTNAME"],
+            self.subject,
+            self.context,
+            access,
+            600,
+            instance_keys,
+        )
+        return {
+            "Authorization": "Bearer %s" % token.decode("ascii"),
+        }
+
+    def test_pull_proxy_whole_dockerhub(self):
+        params = {
+            "repository": self.repository,
+            "manifest_ref": self.tag,
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "GET",
+            params,
+            expected_code=200,
+            headers=self._get_auth_headers(self.repository),
+        )
+
+    def test_pull_proxy_single_namespace_dockerhub(self):
+        params = {
+            "repository": self.repository2,
+            "manifest_ref": self.tag,
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "GET",
+            params,
+            expected_code=200,
+            headers=self._get_auth_headers(self.repository2),
+        )
+
+    def test_pull_proxy_whole_dockerhub_404(self):
+        params = {
+            "repository": self.repository,
+            "manifest_ref": "666",
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "GET",
+            params,
+            expected_code=404,
+            headers=self._get_auth_headers(self.repository),
+        )
+
+    def test_pull_from_dockerhub_by_digest(self):
+        digest = "sha256:f329d076a8806c0ce014ce5e554ca70f4ae9407a16bb03baa7fef287ee6371f1"
+        params = {
+            "repository": self.repository,
+            "manifest_ref": digest,
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_digest",
+            url_for,
+            "GET",
+            params,
+            expected_code=200,
+            headers=self._get_auth_headers(self.repository),
+        )
+
+    def test_check_manifest_exists_from_dockerhub_by_tag(self):
+        params = {
+            "repository": self.repository,
+            "manifest_ref": self.tag,
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "HEAD",
+            params,
+            expected_code=200,
+            headers=self._get_auth_headers(self.repository),
+        )
+
+    def test_check_manifest_exists_from_dockerhub_by_tag_404(self):
+        params = {
+            "repository": self.repository,
+            "manifest_ref": "666",
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "HEAD",
+            params,
+            expected_code=404,
+            headers=self._get_auth_headers(self.repository),
+        )
+
+
+@pytest.mark.e2e
+class TestManifestPullThroughProxy(unittest.TestCase):
+    org = "cache"
+    org2 = "cache-library"
+    registry = "docker.io"
+    repository = f"{org}/library/postgres"
+    repository2 = f"{org2}/postgres"
+    tag = "14"
+    context = None
+    subject = None
+
     @pytest.fixture(autouse=True)
     def setup(self, client, app):
         self.client = client

@@ -69,52 +69,55 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
         image_pulls.labels("v2", "tag", 404).inc()
         raise NameUnknown()
 
-    tag = registry_model.get_repo_tag(repository_ref, manifest_ref)
-    if tag is None:
-        if registry_model.has_expired_tag(repository_ref, manifest_ref):
-            logger.debug(
-                "Found expired tag %s for repository %s/%s", manifest_ref, namespace_name, repo_name
-            )
-            msg = (
-                "Tag %s was deleted or has expired. To pull, revive via time machine" % manifest_ref
-            )
+        tag = registry_model.get_repo_tag(repository_ref, manifest_ref)
+        if tag is None:
+            if registry_model.has_expired_tag(repository_ref, manifest_ref):
+                logger.debug(
+                    "Found expired tag %s for repository %s/%s",
+                    manifest_ref,
+                    namespace_name,
+                    repo_name,
+                )
+                msg = (
+                    "Tag %s was deleted or has expired. To pull, revive via time machine"
+                    % manifest_ref
+                )
+                image_pulls.labels("v2", "tag", 404).inc()
+                raise TagExpired(msg)
+
             image_pulls.labels("v2", "tag", 404).inc()
-            raise TagExpired(msg)
+            raise ManifestUnknown()
 
-        image_pulls.labels("v2", "tag", 404).inc()
-        raise ManifestUnknown()
+        manifest = registry_model.get_manifest_for_tag(tag)
+        if manifest is None:
+            # Something went wrong.
+            image_pulls.labels("v2", "tag", 400).inc()
+            raise ManifestInvalid()
 
-    manifest = registry_model.get_manifest_for_tag(tag)
-    if manifest is None:
-        # Something went wrong.
-        image_pulls.labels("v2", "tag", 400).inc()
-        raise ManifestInvalid()
+        manifest_bytes, manifest_digest, manifest_media_type = self._rewrite_schema_if_necessary(
+            namespace_name, repo_name, manifest_ref, manifest
+        )
+        if manifest_bytes is None:
+            image_pulls.labels("v2", "tag", 404).inc()
+            raise ManifestUnknown()
 
-    manifest_bytes, manifest_digest, manifest_media_type = _rewrite_schema_if_necessary(
-        namespace_name, repo_name, manifest_ref, manifest
-    )
-    if manifest_bytes is None:
-        image_pulls.labels("v2", "tag", 404).inc()
-        raise ManifestUnknown()
+        track_and_log(
+            "pull_repo",
+            repository_ref,
+            analytics_name="pull_repo_100x",
+            analytics_sample=0.01,
+            tag=manifest_ref,
+        )
+        image_pulls.labels("v2", "tag", 200).inc()
 
-    track_and_log(
-        "pull_repo",
-        repository_ref,
-        analytics_name="pull_repo_100x",
-        analytics_sample=0.01,
-        tag=manifest_ref,
-    )
-    image_pulls.labels("v2", "tag", 200).inc()
-
-    return Response(
-        manifest_bytes.as_unicode(),
-        status=200,
-        headers={
-            "Content-Type": manifest_media_type,
-            "Docker-Content-Digest": manifest_digest,
-        },
-    )
-
+        return Response(
+            manifest_bytes.as_unicode(),
+            status=200,
+            headers={
+                "Content-Type": manifest_media_type,
+                "Docker-Content-Digest": manifest_digest,
+            },
+        )
 
 @v2_bp.route(MANIFEST_DIGEST_ROUTE, methods=["GET"])
 @disallow_for_account_recovery_mode
@@ -169,25 +172,31 @@ def _rewrite_schema_if_necessary(namespace_name, repo_name, tag_name, manifest):
         if manifest.media_type in DOCKER_SCHEMA1_CONTENT_TYPES:
             return manifest.internal_manifest_bytes, manifest.digest, manifest.media_type
 
-    logger.debug(
-        "Manifest `%s` not compatible against %s; checking for conversion",
-        manifest.digest,
-        request.accept_mimetypes,
-    )
-    converted = registry_model.convert_manifest(
-        manifest, namespace_name, repo_name, tag_name, mimetypes, storage
-    )
-    if converted is not None:
-        return converted.bytes, converted.digest, converted.media_type
+        # Short-circuit check: If the mimetypes is empty or just `application/json`, verify we have
+        # a schema 1 manifest and return it.
+        if not mimetypes or mimetypes == ["application/json"]:
+            if manifest.media_type in DOCKER_SCHEMA1_CONTENT_TYPES:
+                return manifest.internal_manifest_bytes, manifest.digest, manifest.media_type
 
-    # For back-compat, we always default to schema 1 if the manifest could not be converted.
-    schema1 = registry_model.get_schema1_parsed_manifest(
-        manifest, namespace_name, repo_name, tag_name, storage
-    )
-    if schema1 is None:
-        return None, None, None
+        logger.debug(
+            "Manifest `%s` not compatible against %s; checking for conversion",
+            manifest.digest,
+            request.accept_mimetypes,
+        )
+        converted = registry_model.convert_manifest(
+            manifest, namespace_name, repo_name, tag_name, mimetypes, storage
+        )
+        if converted is not None:
+            return converted.bytes, converted.digest, converted.media_type
 
-    return schema1.bytes, schema1.digest, schema1.media_type
+        # For back-compat, we always default to schema 1 if the manifest could not be converted.
+        schema1 = registry_model.get_schema1_parsed_manifest(
+            manifest, namespace_name, repo_name, tag_name, storage
+        )
+        if schema1 is None:
+            return None, None, None
+
+        return schema1.bytes, schema1.digest, schema1.media_type
 
 
 def _reject_manifest2_schema2(func):

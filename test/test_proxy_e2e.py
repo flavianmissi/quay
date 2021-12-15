@@ -18,7 +18,6 @@ class TestProxyE2E(unittest.TestCase):
     digest_404 = "sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d"
     digest = None  # set by setup
     proxy = None  # set by setup
-    org = None  # set by setup
 
     @pytest.fixture(autouse=True)
     def setup(self):

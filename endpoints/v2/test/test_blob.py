@@ -1,3 +1,5 @@
+import json
+import unittest
 import hashlib
 import pytest
 
@@ -14,6 +16,134 @@ from data.database import ImageStorageLocation
 from endpoints.test.shared import conduct_call
 from util.security.registry_jwt import generate_bearer_token, build_context_and_subject
 from test.fixtures import *
+
+
+@pytest.mark.e2e
+class TestBlobPullThroughProxy(unittest.TestCase):
+    org = "cache"
+    registry = "docker.io"
+    repository = f"{org}/library/postgres"
+    tag = "14"
+    _blob_digest = None
+
+    @pytest.fixture(autouse=True)
+    def setup(self, client, app):
+        self.client = client
+        realapp.config.update({"FEATURE_PROXY_CACHE": True})
+
+        self.user = model.user.get_user("devtable")
+        context, subject = build_context_and_subject(ValidatedAuthContext(user=self.user))
+        access = [
+            {
+                "type": "repository",
+                "name": self.repository,
+                "actions": ["pull"],
+            }
+        ]
+        token = generate_bearer_token(
+            realapp.config["SERVER_HOSTNAME"], subject, context, access, 600, instance_keys
+        )
+        self.headers = {
+            "Authorization": f"Bearer {token.decode('ascii')}",
+        }
+
+        try:
+            model.organization.get(self.org)
+        except Exception:
+            org = model.organization.create_organization(self.org, "cache@devtable.com", self.user)
+            org.save()
+
+        try:
+            model.proxy_cache.get_proxy_cache_config_for_org(self.org)
+        except Exception:
+            model.proxy_cache.create_proxy_cache_config(
+                org_name=self.org,
+                upstream_registry=self.registry,
+                staleness_period_s=3600,
+            )
+
+    def _get_blob_digest(self) -> str:
+        if self._blob_digest is not None:
+            return self._blob_digest
+
+        params = {
+            "repository": self.repository,
+            "manifest_ref": self.tag,
+        }
+        resp = conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "GET",
+            params,
+            expected_code=200,
+            headers=self.headers,
+        )
+        manifest = json.loads(resp.response[0])
+        self._blob_digest = manifest["fsLayers"][0]["blobSum"]
+        return self._blob_digest
+
+    def test_pull_from_dockerhub(self):
+        params = {
+            "repository": self.repository,
+            "digest": self._get_blob_digest(),
+        }
+        conduct_call(
+            self.client,
+            "v2.download_blob",
+            url_for,
+            "GET",
+            params,
+            expected_code=200,
+            headers=self.headers,
+        )
+
+    def test_pull_from_dockerhub_404(self):
+        digest = "sha256:" + hashlib.sha256(b"a").hexdigest()
+        params = {
+            "repository": self.repository,
+            "digest": digest,
+        }
+        conduct_call(
+            self.client,
+            "v2.download_blob",
+            url_for,
+            "GET",
+            params,
+            expected_code=404,
+            headers=self.headers,
+        )
+
+    def test_check_blob_exists_from_dockerhub(self):
+        params = {
+            "repository": self.repository,
+            "digest": self._get_blob_digest(),
+        }
+        conduct_call(
+            self.client,
+            "v2.check_blob_exists",
+            url_for,
+            "HEAD",
+            params,
+            expected_code=200,
+            headers=self.headers,
+        )
+
+    def test_check_blob_exists_from_dockerhub_404(self):
+        digest = "sha256:" + hashlib.sha256(b"a").hexdigest()
+        params = {
+            "repository": self.repository,
+            "digest": digest,
+        }
+        conduct_call(
+            self.client,
+            "v2.check_blob_exists",
+            url_for,
+            "HEAD",
+            params,
+            expected_code=404,
+            headers=self.headers,
+        )
 
 
 @pytest.mark.parametrize(
@@ -34,6 +164,7 @@ def test_blob_caching(method, endpoint, client, app):
     }
 
     user = model.user.get_user("devtable")
+
     access = [
         {
             "type": "repository",
@@ -56,7 +187,6 @@ def test_blob_caching(method, endpoint, client, app):
     conduct_call(
         client, "v2." + endpoint, url_for, method, params, expected_code=200, headers=headers
     )
-
     with patch("endpoints.v2.blob.model_cache", InMemoryDataModelCache(TEST_CACHE_CONFIG)):
         # First request should make a DB query to retrieve the blob.
         conduct_call(

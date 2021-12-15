@@ -182,6 +182,7 @@ def appconfig(database_uri):
         "MAIL_SERVER": "",
         "MAIL_DEFAULT_SENDER": "admin@example.com",
         "DATABASE_SECRET_KEY": "anothercrazykey!",
+        "FEATURE_PROXY_CACHE": True,
     }
     return conf
 

@@ -29,6 +29,10 @@ class InvalidOrganizationException(DataModelException):
     pass
 
 
+class InvalidProxyCacheConfigException(DataModelException):
+    pass
+
+
 class InvalidPasswordException(DataModelException):
     pass
 

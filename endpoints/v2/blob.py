@@ -1,5 +1,6 @@
 import logging
 import re
+import requests
 
 from flask import url_for, request, redirect, Response, abort as flask_abort
 
@@ -88,6 +89,87 @@ def check_blob_exists(namespace_name, repo_name, digest):
 @check_region_blacklisted(BlobDownloadGeoBlocked)
 @cache_control(max_age=31536000)
 def download_blob(namespace_name, repo_name, digest):
+    # TODO: quay auth check returns 401 when the repository doesn't exist.
+    # we shouldn't force customers to create every single repository before
+    # doing the pull-thru, so this need to be circumvented somehow.
+
+    # hard code pull-thru proxy config for proof of concept
+    PULL_THRU_CONFIG = {
+        "namespace": "library",
+        "registry": "https://registry.hub.docker.com",
+        "auth": "https://auth.docker.io/token",
+        "repository": "postgres",
+    }
+    if namespace_name == PULL_THRU_CONFIG["namespace"]:
+        session = requests.Session()
+
+        # use anonymous auth for now.
+        auth_url = PULL_THRU_CONFIG["auth"].rstrip("/") + f"?service=registry.docker.io&scope=repository:{namespace_name}/{repo_name}:pull"
+        token = session.get(auth_url).json()["token"]
+
+        url = PULL_THRU_CONFIG["registry"].rstrip("/") + f"/v2/{namespace_name}/{repo_name}/blobs/{digest}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+        }
+        accept = request.headers.get("Accept", None)
+        if accept is not None:
+            headers["Accept"] = accept
+
+        # check if blob exists in upstream, this won't count towards quota
+        resp = session.head(url, headers=headers, allow_redirects=True)
+        if resp.status_code != 200:
+            # TODO: make it clear to the client that this error is a 404
+            # from the upstream registry.
+            error = {
+                "errors": [{"message": "fail to fetch upstream stuff"}],
+                "upstream_error": resp.json(),
+            }
+            return Response(
+                error,
+                status=resp.status_code,
+            )
+
+        # download blob
+        resp = session.get(
+            url,
+            headers=headers,
+            allow_redirects=True,
+            stream=True,
+        )
+        if resp.status_code != 200:
+            # TODO: inspect response and return appropriate error to client
+            error = {
+                "error": "fail to fetch upstream stuff",
+                "errors": [{"message": "fail to fetch upstream stuff"}],
+                "upstream_error": resp.json(),
+            }
+            return Response(
+                error,
+                status=resp.status_code,
+            )
+
+        def stream_contents():
+            chunk = 1024
+            for chunk in resp.iter_content(chunk_size=chunk):
+                yield chunk
+
+        blob_size = int(resp.headers.get("Content-Length"))
+        headers = {
+            "Docker-Content-Digest": digest,
+            "Content-Type": BLOB_CONTENT_TYPE,
+            "Content-Length": blob_size,
+        }
+        accept_ranges = resp.headers.get("Accept-Ranges", None)
+        if accept_ranges is not None:
+            headers["Accept-Ranges"] = accept_ranges
+
+        image_pulled_bytes.labels("v2").inc(blob_size)
+        return Response(
+            stream_contents(),
+            headers=headers,
+        )
+
+
     # Find the blob.
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
     if blob is None:

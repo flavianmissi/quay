@@ -33,7 +33,6 @@ from endpoints.v2.errors import (
     ManifestInvalid,
     ManifestUnknown,
     NameInvalid,
-    InvalidRequest,
     TagExpired,
     NameUnknown,
 )
@@ -42,7 +41,6 @@ from image.shared.schemas import parse_manifest_from_bytes
 from image.docker.schema1 import (
     DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE,
     DOCKER_SCHEMA1_CONTENT_TYPES,
-    DockerSchema1Manifest,
 )
 from image.docker.schema2 import DOCKER_SCHEMA2_CONTENT_TYPES
 from image.oci import OCI_CONTENT_TYPES

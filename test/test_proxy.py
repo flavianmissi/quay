@@ -129,9 +129,7 @@ class TestProxy(unittest.TestCase):
                 image_ref="14", media_type="application/vnd.docker.distribution.manifest.v2+json"
             )
         manifest = json.loads(resp["content"])
-        self.assertEqual(
-            list(manifest.keys()), ["schemaVersion", "mediaType", "config", "layers"]
-        )
+        self.assertEqual(list(manifest.keys()), ["schemaVersion", "mediaType", "config", "layers"])
 
     def test_get_manifest_404(self):
         with HTTMock(docker_registry_mock):

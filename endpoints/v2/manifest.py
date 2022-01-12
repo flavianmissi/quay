@@ -5,8 +5,6 @@ from functools import wraps
 
 from flask import request, url_for, Response
 
-import requests
-
 import features
 
 from app import app, storage
@@ -38,10 +36,7 @@ from endpoints.v2.errors import (
 )
 from image.shared import ManifestException
 from image.shared.schemas import parse_manifest_from_bytes
-from image.docker.schema1 import (
-    DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE,
-    DOCKER_SCHEMA1_CONTENT_TYPES,
-)
+from image.docker.schema1 import DOCKER_SCHEMA1_MANIFEST_CONTENT_TYPE, DOCKER_SCHEMA1_CONTENT_TYPES
 from image.docker.schema2 import DOCKER_SCHEMA2_CONTENT_TYPES
 from image.oci import OCI_CONTENT_TYPES
 from notifications import spawn_notification

@@ -1,4 +1,5 @@
 import unittest
+import json
 
 from httmock import urlmatch, response, HTTMock
 
@@ -124,25 +125,25 @@ class TestProxy(unittest.TestCase):
     def test_get_manifest(self):
         with HTTMock(docker_registry_mock):
             proxy = Proxy("registry-1.docker.io", "library/postgres")
-            manifest = proxy.get_manifest(
+            resp = proxy.get_manifest(
                 image_ref="14", media_type="application/vnd.docker.distribution.manifest.v2+json"
             )
-            self.assertEqual(
-                list(manifest.keys()), ["schemaVersion", "mediaType", "config", "layers"]
-            )
+        manifest = json.loads(resp["content"])
+        self.assertEqual(
+            list(manifest.keys()), ["schemaVersion", "mediaType", "config", "layers"]
+        )
 
     def test_get_manifest_404(self):
         with HTTMock(docker_registry_mock):
             proxy = Proxy("registry-1.docker.io", "library/postgres")
-            with self.assertRaises(Exception) as cm:
-                manifest = proxy.get_manifest(
-                    image_ref="666",
-                    media_type="application/vnd.docker.distribution.manifest.v2+json",
-                )
+            resp = proxy.get_manifest(
+                image_ref="666",
+                media_type="application/vnd.docker.distribution.manifest.v2+json",
+            )
         unknown_manifest = {
             "code": "MANIFEST_UNKNOWN",
             "message": "manifest unknown",
             "detail": "unknown tag=666",
         }
-        error = cm.exception.args[0].get("errors", [{}])[0]
+        error = json.loads(resp["content"])["errors"][0]
         self.assertEqual(unknown_manifest, error)

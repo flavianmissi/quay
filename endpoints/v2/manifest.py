@@ -1,4 +1,5 @@
 import logging
+import json
 
 from functools import wraps
 
@@ -50,6 +51,7 @@ from util.audit import track_and_log
 from util.bytes import Bytes
 from util.names import VALID_TAG_PATTERN
 from util.registry.replication import queue_replication_batch
+from proxy import Proxy
 
 
 logger = logging.getLogger(__name__)
@@ -57,49 +59,6 @@ logger = logging.getLogger(__name__)
 BASE_MANIFEST_ROUTE = '/<repopath:repository>/manifests/<regex("{0}"):manifest_ref>'
 MANIFEST_DIGEST_ROUTE = BASE_MANIFEST_ROUTE.format(digest_tools.DIGEST_PATTERN)
 MANIFEST_TAGNAME_ROUTE = BASE_MANIFEST_ROUTE.format(VALID_TAG_PATTERN)
-
-
-def _proxy_upstream(config, namespace_name, repo_name, manifest_ref):
-    session = requests.Session()
-
-    # use anonymous auth for now.
-    auth_url = config["auth"].rstrip("/") + f"?service=registry.docker.io&scope=repository:{namespace_name}/{repo_name}:pull"
-    token = session.get(auth_url).json()["token"]
-
-    url = config["registry"].rstrip("/") + f"/v2/{namespace_name}/{repo_name}/manifests/{manifest_ref}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-    }
-    accept = request.headers.get("Accept", None)
-    if accept is not None:
-        headers["Accept"] = accept
-
-    # check if manifest exists in upstream, this won't count towards quota
-    resp = session.head(url, headers=headers)
-    if resp.status_code != 200:
-        # TODO: make it clear to the client that this error is a 404
-        # from the upstream registry.
-        return Response(
-            resp.text,
-            status=resp.status_code,
-        )
-
-    resp = session.get(url, headers=headers)
-    if resp.status_code != 200:
-        # TODO: inspect response and return appropriate error to client
-        return Response(
-            resp.text,
-            status=resp.status_code,
-        )
-
-    return Response(
-        resp.text,
-        status=200,
-        headers={
-            "Content-Type": resp.headers["Content-Type"],
-            "Docker-Content-Digest": resp.headers["Docker-Content-Digest"],
-        },
-    )
 
 
 @v2_bp.route(MANIFEST_TAGNAME_ROUTE, methods=["GET"])
@@ -120,8 +79,19 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
         "auth": "https://auth.docker.io/token",
         "repository": "postgres",
     }
+
     if namespace_name == PULL_THRU_CONFIG["namespace"]:
-        return _proxy_upstream(PULL_THRU_CONFIG, namespace_name, repo_name, manifest_ref)
+        proxy = Proxy(PULL_THRU_CONFIG["registry"], f"{namespace_name}/{repo_name}")
+        media_type = request.headers.get("Accept", None)
+        resp = proxy.get_manifest(manifest_ref, media_type)
+        return Response(
+            resp["content"],
+            status=resp["status"],
+            headers={
+                "Content-Type": resp["headers"]["Content-Type"],
+                "Docker-Content-Digest": resp["headers"]["Docker-Content-Digest"],
+            },
+        )
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
@@ -185,11 +155,21 @@ def fetch_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     # hard code pull-thru proxy config for proof of concept
     PULL_THRU_CONFIG = {
         "namespace": "library",
-        "registry": "https://registry.hub.docker.com",
+        "registry": "https://registry-1.docker.io",
         "auth": "https://auth.docker.io/token",
     }
     if namespace_name == PULL_THRU_CONFIG["namespace"]:
-        return _proxy_upstream(PULL_THRU_CONFIG, namespace_name, repo_name, manifest_ref)
+        proxy = Proxy(PULL_THRU_CONFIG["registry"], f"{namespace_name}/{repo_name}")
+        media_type = request.headers.get("Accept", None)
+        resp = proxy.get_manifest(manifest_ref, media_type)
+        return Response(
+            resp["content"],
+            status=resp["status"],
+            headers={
+                "Content-Type": resp.headers["Content-Type"],
+                "Docker-Content-Digest": resp.headers["Docker-Content-Digest"],
+            },
+        )
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:

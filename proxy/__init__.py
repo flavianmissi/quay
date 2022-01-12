@@ -14,7 +14,6 @@ DEFAULT_SCHEME = "https"
 WWW_AUTHENTICATE_REGEX = re.compile(r'(\w+)[=] ?"?([^",]+)"?')
 
 
-
 def parse_www_auth(value: str) -> dict[str, str]:
     """
     Parses WWW-Authenticate parameters and returns a dict of key=val.
@@ -46,9 +45,11 @@ class Proxy:
             url,
             headers=headers,
         )
-        if not resp.ok:
-            raise Exception(resp.json())
-        return resp.json()
+        return {
+            "content": resp.text,
+            "status": resp.status_code,
+            "headers": resp.headers,
+        }
 
     def _authorize(self, auth: tuple[str, str] | None = None):
         resp = self.session.get(f"{self.base_url}/v2/")
@@ -63,7 +64,7 @@ class Proxy:
         realm = www_auth.get("realm")
 
         scope = f"repository:{self._repo}:pull"
-        auth_url =  f"{realm}?service={service}&scope={scope}"
+        auth_url = f"{realm}?service={service}&scope={scope}"
         basic_auth = None
         if auth is not None:
             basic_auth = requests.auth.HTTPBasicAuth(auth[0], auth[1])

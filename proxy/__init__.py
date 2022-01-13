@@ -37,7 +37,6 @@ class Proxy:
     def get_manifest(self, image_ref: str, media_type: str | None = None) -> dict[str, Any]:
         headers = {}
         if media_type is not None:
-            # TODO: check specification for a possible default media type
             headers["Accept"] = media_type
 
         url = f"{self.base_url}/v2/{self._repo}/manifests/{image_ref}"
@@ -46,7 +45,7 @@ class Proxy:
             headers=headers,
         )
         return {
-            "content": resp.text,
+            "response": resp.text,
             "status": resp.status_code,
             "headers": dict(resp.headers),
         }

@@ -128,7 +128,7 @@ class TestProxy(unittest.TestCase):
             resp = proxy.get_manifest(
                 image_ref="14", media_type="application/vnd.docker.distribution.manifest.v2+json"
             )
-        manifest = json.loads(resp["content"])
+        manifest = json.loads(resp["response"])
         self.assertEqual(list(manifest.keys()), ["schemaVersion", "mediaType", "config", "layers"])
 
     def test_get_manifest_404(self):
@@ -143,5 +143,5 @@ class TestProxy(unittest.TestCase):
             "message": "manifest unknown",
             "detail": "unknown tag=666",
         }
-        error = json.loads(resp["content"])["errors"][0]
+        error = json.loads(resp["response"])["errors"][0]
         self.assertEqual(unknown_manifest, error)

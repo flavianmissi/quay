@@ -76,12 +76,7 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
         proxy = Proxy(PULL_THRU_CONFIG["registry"], repo_name)
         media_type = request.headers.get("Accept", None)
         resp = proxy.get_manifest(manifest_ref, media_type)
-
-        return Response(
-            resp["content"],
-            status=resp["status"],
-            headers=resp["headers"],
-        )
+        return Response(**resp)
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
@@ -153,11 +148,7 @@ def fetch_manifest_by_digest(namespace_name, repo_name, manifest_ref):
         proxy = Proxy(PULL_THRU_CONFIG["registry"], repo_name)
         media_type = request.headers.get("Accept", None)
         resp = proxy.get_manifest(manifest_ref, media_type)
-        return Response(
-            resp["content"],
-            status=resp["status"],
-            headers=resp["headers"],
-        )
+        return Response(**resp)
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:

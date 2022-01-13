@@ -42,7 +42,6 @@ class TestManifestPullThroughProxy(unittest.TestCase):
         token = generate_bearer_token(
             realapp.config["SERVER_HOSTNAME"], subject, context, access, 600, instance_keys
         )
-        print(token)
         self.headers = {
             "Authorization": "Bearer %s" % token.decode("ascii"),
         }

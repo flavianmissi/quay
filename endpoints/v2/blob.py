@@ -129,7 +129,7 @@ def download_blob(namespace_name, repo_name, digest):
             # from the upstream registry.
             error = {
                 "errors": [{"message": "fail to fetch upstream stuff"}],
-                "upstream_error": resp.json(),
+                "upstream_error": resp.text,
             }
             return Response(
                 error,

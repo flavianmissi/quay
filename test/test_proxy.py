@@ -6,6 +6,12 @@ from httmock import urlmatch, response, HTTMock
 from proxy import Proxy, parse_www_auth
 
 
+ANONYMOUS_TOKEN = "anonymous-token"
+USER_TOKEN = "user-token"
+DIGEST = "sha256:2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6"
+DIGEST_404 = "sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d"
+
+
 class TestWWWAuthParser(unittest.TestCase):
     realm = "https://auth.docker.io/token"
     service = "registry.docker.io"
@@ -39,10 +45,6 @@ def docker_registry_mock_401(url, request):
         ]
     }
     return response(401, content, headers)
-
-
-ANONYMOUS_TOKEN = "anonymous-token"
-USER_TOKEN = "user-token"
 
 
 def docker_auth_mock(url, request):
@@ -87,6 +89,11 @@ def docker_registry_manifest_404(url, request):
         ]
     }
     return response(404, content)
+
+
+def docker_registry_blob(url, request):
+    content = {}
+    return response(200, content)
 
 
 @urlmatch(netloc=r"(.*\.)?docker\.io")
@@ -142,6 +149,37 @@ class TestProxy(unittest.TestCase):
             "code": "MANIFEST_UNKNOWN",
             "message": "manifest unknown",
             "detail": "unknown tag=666",
+        }
+        error = json.loads(resp["response"])["errors"][0]
+        self.assertEqual(unknown_manifest, error)
+
+    def test_get_blob(self):
+        with HTTMock(docker_registry_mock):
+            proxy = Proxy("registry-1.docker.io", "library/postgres")
+            resp = proxy.get_blob(
+                digest=DIGEST,
+                media_type="application/vnd.docker.distribution.manifest.v2+json"
+            )
+        self.assertEqual(resp["status"], 200)
+
+    def test_get_blob_return_required_headers(self):
+        required_headers = [
+            "Docker-Content-Digest",
+            "Content-Type",
+            "Content-Length"
+        ]
+
+    def test_get_blob_404(self):
+        with HTTMock(docker_registry_mock):
+            proxy = Proxy("registry-1.docker.io", "library/postgres")
+            resp = proxy.get_blob(
+                digest=DIGEST_404,
+                media_type="application/vnd.docker.distribution.manifest.v2+json",
+            )
+        unknown_manifest = {
+            "code": "BLOB_UNKNOWN",
+            "message": "blob unknown to registry",
+            "detail": "", # none?
         }
         error = json.loads(resp["response"])["errors"][0]
         self.assertEqual(unknown_manifest, error)

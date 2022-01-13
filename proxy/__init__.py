@@ -10,6 +10,7 @@ import re
 import requests
 
 
+# BLOB_CONTENT_TYPE = "application/octet-stream"
 DEFAULT_SCHEME = "https"
 WWW_AUTHENTICATE_REGEX = re.compile(r'(\w+)[=] ?"?([^",]+)"?')
 
@@ -46,6 +47,45 @@ class Proxy:
         )
         return {
             "response": resp.text,
+            "status": resp.status_code,
+            "headers": dict(resp.headers),
+        }
+
+    def get_blob(self, digest: str, media_type: str | None = None):
+        headers = {}
+        if media_type is not None:
+            headers["Accept"] = media_type
+
+        url = f"{self.base_url}/v2/{self._repo}/blobs/{digest}"
+        resp = self.session.get(
+            url,
+            headers=headers,
+            allow_redirects=True,
+            stream=True,
+        )
+        if not resp.ok:
+            return {
+                "response": resp.text,
+                "status": resp.status_code,
+                "headers": dict(resp.headers),
+            }
+
+        def stream_contents():
+            chunk = 1024
+            for chunk in resp.iter_content(chunk_size=chunk):
+                yield chunk
+
+        # blob_size = int(resp.headers.get("Content-Length"))
+        # headers = {
+        #     "Docker-Content-Digest": digest,
+        #     "Content-Type": BLOB_CONTENT_TYPE,
+        #     "Content-Length": blob_size,
+        # }
+        # accept_ranges = resp.headers.get("Accept-Ranges", None)
+        # if accept_ranges is not None:
+        #     headers["Accept-Ranges"] = accept_ranges
+        return {
+            "response": stream_contents(),
             "status": resp.status_code,
             "headers": dict(resp.headers),
         }

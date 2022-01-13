@@ -48,7 +48,7 @@ class Proxy:
         return {
             "content": resp.text,
             "status": resp.status_code,
-            "headers": resp.headers,
+            "headers": dict(resp.headers),
         }
 
     def _authorize(self, auth: tuple[str, str] | None = None):

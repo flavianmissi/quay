@@ -66,24 +66,21 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
     # doing the pull-thru, so this need to be circumvented somehow.
 
     # hard code pull-thru proxy config for proof of concept
+    CACHE_ORG = "cache"
     PULL_THRU_CONFIG = {
         "namespace": "library",
-        "registry": "https://registry.hub.docker.com",
-        "auth": "https://auth.docker.io/token",
         "repository": "postgres",
+        "registry": "https://registry.hub.docker.com",
     }
-
-    if namespace_name == PULL_THRU_CONFIG["namespace"]:
-        proxy = Proxy(PULL_THRU_CONFIG["registry"], f"{namespace_name}/{repo_name}")
+    if namespace_name == CACHE_ORG:
+        proxy = Proxy(PULL_THRU_CONFIG["registry"], repo_name)
         media_type = request.headers.get("Accept", None)
         resp = proxy.get_manifest(manifest_ref, media_type)
+
         return Response(
             resp["content"],
             status=resp["status"],
-            headers={
-                "Content-Type": resp["headers"]["Content-Type"],
-                "Docker-Content-Digest": resp["headers"]["Docker-Content-Digest"],
-            },
+            headers=resp["headers"],
         )
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
@@ -146,22 +143,20 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
 @anon_protect
 def fetch_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     # hard code pull-thru proxy config for proof of concept
+    CACHE_ORG = "cache"
     PULL_THRU_CONFIG = {
         "namespace": "library",
         "registry": "https://registry-1.docker.io",
         "auth": "https://auth.docker.io/token",
     }
-    if namespace_name == PULL_THRU_CONFIG["namespace"]:
-        proxy = Proxy(PULL_THRU_CONFIG["registry"], f"{namespace_name}/{repo_name}")
+    if namespace_name == CACHE_ORG:
+        proxy = Proxy(PULL_THRU_CONFIG["registry"], repo_name)
         media_type = request.headers.get("Accept", None)
         resp = proxy.get_manifest(manifest_ref, media_type)
         return Response(
             resp["content"],
             status=resp["status"],
-            headers={
-                "Content-Type": resp.headers["Content-Type"],
-                "Docker-Content-Digest": resp.headers["Docker-Content-Digest"],
-            },
+            headers=resp["headers"],
         )
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)

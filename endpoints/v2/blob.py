@@ -94,20 +94,27 @@ def download_blob(namespace_name, repo_name, digest):
     # doing the pull-thru, so this need to be circumvented somehow.
 
     # hard code pull-thru proxy config for proof of concept
+    CACHE_ORG = "cache"
     PULL_THRU_CONFIG = {
         "namespace": "library",
         "registry": "https://registry.hub.docker.com",
         "auth": "https://auth.docker.io/token",
         "repository": "postgres",
     }
-    if namespace_name == PULL_THRU_CONFIG["namespace"]:
+    if namespace_name == CACHE_ORG:
         session = requests.Session()
 
         # use anonymous auth for now.
-        auth_url = PULL_THRU_CONFIG["auth"].rstrip("/") + f"?service=registry.docker.io&scope=repository:{namespace_name}/{repo_name}:pull"
+        auth_url = (
+            PULL_THRU_CONFIG["auth"].rstrip("/")
+            + f"?service=registry.docker.io&scope=repository:{repo_name}:pull"
+        )
         token = session.get(auth_url).json()["token"]
 
-        url = PULL_THRU_CONFIG["registry"].rstrip("/") + f"/v2/{namespace_name}/{repo_name}/blobs/{digest}"
+        url = (
+            PULL_THRU_CONFIG["registry"].rstrip("/")
+            + f"/v2/{repo_name}/blobs/{digest}"
+        )
         headers = {
             "Authorization": f"Bearer {token}",
         }
@@ -168,7 +175,6 @@ def download_blob(namespace_name, repo_name, digest):
             stream_contents(),
             headers=headers,
         )
-
 
     # Find the blob.
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)

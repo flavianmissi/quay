@@ -13,6 +13,7 @@ from auth.permissions import CreateRepositoryPermission
 from auth.auth_context import get_authenticated_user
 from digest import digest_tools
 from data.database import db_disallow_replica_use, db_transaction
+from data.model.proxy_cache import get_proxy_cache_config_for_org
 from data.registry_model.blobuploader import create_blob_upload, complete_when_uploaded
 from data.registry_model import registry_model
 from data.model.oci.manifest import CreateManifestException
@@ -64,16 +65,19 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
     # TODO: quay auth check returns 401 when the repository doesn't exist.
     # we shouldn't force customers to create every single repository before
     # doing the pull-thru, so this need to be circumvented somehow.
+    if app.config.get("FEATURE_PROXY_CACHE", False):
+        config = get_proxy_cache_config_for_org(namespace_name)
+        # users can configure a proxy org to proxy a whole registry or a single namespace.
+        # when proxying an entire registry, the upstream namespace is not set, and the
+        # given repo_name will be an exact match of the upstream namespace/repository combo.
+        repo = repo_name
+        target_ns = config.upstream_registry_namespace
+        if target_ns != "" and target_ns is not None:
+            # when proxying a single namespace, the repo_name will not contain the upstream namespace,
+            # so we get that from the proxy config and put them together.
+            repo = f"{target_ns}/{repo_name}"
 
-    # hard code pull-thru proxy config for proof of concept
-    CACHE_ORG = "cache"
-    PULL_THRU_CONFIG = {
-        "namespace": "library",
-        "repository": "postgres",
-        "registry": "https://registry.hub.docker.com",
-    }
-    if namespace_name == CACHE_ORG:
-        proxy = Proxy(PULL_THRU_CONFIG["registry"], repo_name)
+        proxy = Proxy(config.upstream_registry, repo)
         media_type = request.headers.get("Accept", None)
         resp = proxy.get_manifest(manifest_ref, media_type)
         return Response(**resp)
@@ -137,15 +141,19 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
 @require_repo_read
 @anon_protect
 def fetch_manifest_by_digest(namespace_name, repo_name, manifest_ref):
-    # hard code pull-thru proxy config for proof of concept
-    CACHE_ORG = "cache"
-    PULL_THRU_CONFIG = {
-        "namespace": "library",
-        "registry": "https://registry-1.docker.io",
-        "auth": "https://auth.docker.io/token",
-    }
-    if namespace_name == CACHE_ORG:
-        proxy = Proxy(PULL_THRU_CONFIG["registry"], repo_name)
+    if app.config.get("FEATURE_PROXY_CACHE", False):
+        config = get_proxy_cache_config_for_org(namespace_name)
+        # users can configure a proxy org to proxy a whole registry or a single namespace.
+        # when proxying an entire registry, the upstream namespace is not set, and the
+        # given repo_name will be an exact match of the upstream namespace/repository combo.
+        repo = repo_name
+        target_ns = config.upstream_registry_namespace
+        if target_ns != "" and target_ns is not None:
+            # when proxying a single namespace, the repo_name will not contain the upstream namespace,
+            # so we get that from the proxy config and put them together.
+            repo = f"{target_ns}/{repo_name}"
+
+        proxy = Proxy(config.upstream_registry, repo)
         media_type = request.headers.get("Accept", None)
         resp = proxy.get_manifest(manifest_ref, media_type)
         return Response(**resp)

@@ -23,8 +23,13 @@ from initdb import TEST_STRIPE_ID
 @pytest.mark.e2e
 class TestManifestPullThroughProxy(unittest.TestCase):
     org = "cache"
+    org2 = "cache-library"
+    registry = "registry-1.docker.io"
     repository = f"{org}/library/postgres"
+    repository2 = f"{org2}/postgres"
     tag = "14"
+    context = None
+    subject = None
 
     @pytest.fixture(autouse=True)
     def setup(self, client, app):
@@ -32,19 +37,8 @@ class TestManifestPullThroughProxy(unittest.TestCase):
         self.app = app
         self.user = model.user.get_user("devtable")
         context, subject = build_context_and_subject(ValidatedAuthContext(user=self.user))
-        access = [
-            {
-                "type": "repository",
-                "name": self.repository,
-                "actions": ["pull"],
-            }
-        ]
-        token = generate_bearer_token(
-            realapp.config["SERVER_HOSTNAME"], subject, context, access, 600, instance_keys
-        )
-        self.headers = {
-            "Authorization": "Bearer %s" % token.decode("ascii"),
-        }
+        self.context = context
+        self.subject = subject
 
         try:
             model.organization.get(self.org)
@@ -53,7 +47,62 @@ class TestManifestPullThroughProxy(unittest.TestCase):
             org.stripe_id = TEST_STRIPE_ID
             org.save()
 
-    def test_pull_from_dockerhub(self):
+        try:
+            model.organization.get(self.org2)
+        except Exception:
+            org = model.organization.create_organization(
+                self.org2,
+                "cache-library@devtable.com",
+                self.user,
+            )
+            org.stripe_id = TEST_STRIPE_ID
+            org.save()
+
+        conf = model.proxy_cache.get_proxy_cache_config_for_org(self.org)
+        if conf is None:
+            model.proxy_cache.create_proxy_cache_config(
+                org_name=self.org,
+                upstream_registry=self.registry,
+                upstream_registry_namespace="",
+                upstream_registry_repository="",
+                upstream_registry_username="",
+                upstream_registry_password="",
+                staleness_period_s=3600,
+            )
+
+        conf2 = model.proxy_cache.get_proxy_cache_config_for_org(self.org2)
+        if conf2 is None:
+            model.proxy_cache.create_proxy_cache_config(
+                org_name=self.org2,
+                upstream_registry=self.registry,
+                upstream_registry_namespace="library",
+                upstream_registry_repository="",
+                upstream_registry_username="",
+                upstream_registry_password="",
+                staleness_period_s=3600,
+            )
+
+    def _get_auth_headers(self, repository):
+        access = [
+            {
+                "type": "repository",
+                "name": repository,
+                "actions": ["pull"],
+            }
+        ]
+        token = generate_bearer_token(
+            realapp.config["SERVER_HOSTNAME"],
+            self.subject,
+            self.context,
+            access,
+            600,
+            instance_keys,
+        )
+        return {
+            "Authorization": "Bearer %s" % token.decode("ascii"),
+        }
+
+    def test_pull_proxy_whole_dockerhub(self):
         params = {
             "repository": self.repository,
             "manifest_ref": self.tag,
@@ -65,10 +114,25 @@ class TestManifestPullThroughProxy(unittest.TestCase):
             "GET",
             params,
             expected_code=200,
-            headers=self.headers,
+            headers=self._get_auth_headers(self.repository),
         )
 
-    def test_pull_from_dockerhub_404(self):
+    def test_pull_proxy_single_namespace_dockerhub(self):
+        params = {
+            "repository": self.repository2,
+            "manifest_ref": self.tag,
+        }
+        conduct_call(
+            self.client,
+            "v2.fetch_manifest_by_tagname",
+            url_for,
+            "GET",
+            params,
+            expected_code=200,
+            headers=self._get_auth_headers(self.repository2),
+        )
+
+    def test_pull_proxy_whole_dockerhub_404(self):
         params = {
             "repository": self.repository,
             "manifest_ref": "666",
@@ -80,7 +144,7 @@ class TestManifestPullThroughProxy(unittest.TestCase):
             "GET",
             params,
             expected_code=404,
-            headers=self.headers,
+            headers=self._get_auth_headers(self.repository),
         )
 
     def test_pull_from_dockerhub_by_digest(self):
@@ -95,7 +159,7 @@ class TestManifestPullThroughProxy(unittest.TestCase):
             "GET",
             params,
             expected_code=200,
-            headers=self.headers,
+            headers=self._get_auth_headers(self.repository),
         )
 
 

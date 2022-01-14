@@ -2060,7 +2060,7 @@ class ProxyCacheConfig(BaseModel):
     upstream_registry_username = EncryptedCharField(max_length=2048, null=True)
     upstream_registry_password = EncryptedCharField(max_length=2048, null=True)
     staleness_period_s = IntegerField(default=0)
-    quota_enabled = BooleanField(default=False)
+    # quota_enabled = BooleanField(default=False)
 
 
 # Defines a map from full-length index names to the legacy names used in our code

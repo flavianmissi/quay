@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 def upgrade(op, tables, tester):
     op.create_table(
-        "proxy_cache_config",
+        "proxycacheconfig",
         sa.Column("id", sa.Integer, nullable=False),
         sa.Column("user_id", sa.Integer, nullable=False),
         sa.Column("creation_date", sa.DateTime(), nullable=False),

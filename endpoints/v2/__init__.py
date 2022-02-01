@@ -113,7 +113,10 @@ def paginate(
 def _require_repo_permission(permission_class, scopes=None, allow_public=False):
     def wrapper(func):
         @wraps(func)
-        def wrapped(namespace_name, repo_name, *args, **kwargs):
+        def wrapped(*args, **kwargs):
+            namespace_name = kwargs.get("namespace_name", None)
+            repo_name = kwargs.get("repo_name", None)
+
             logger.debug(
                 "Checking permission %s for repo: %s/%s",
                 permission_class,
@@ -123,7 +126,7 @@ def _require_repo_permission(permission_class, scopes=None, allow_public=False):
 
             permission = permission_class(namespace_name, repo_name)
             if permission.can():
-                return func(namespace_name, repo_name, *args, **kwargs)
+                return func(*args, **kwargs)
 
             repository = namespace_name + "/" + repo_name
             if allow_public:
@@ -142,7 +145,7 @@ def _require_repo_permission(permission_class, scopes=None, allow_public=False):
                     if not features.ANONYMOUS_ACCESS:
                         raise Unauthorized(repository=repository, scopes=scopes)
 
-                    return func(namespace_name, repo_name, *args, **kwargs)
+                    return func(*args, **kwargs)
 
             raise Unauthorized(repository=repository, scopes=scopes)
 

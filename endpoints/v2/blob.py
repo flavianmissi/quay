@@ -64,7 +64,7 @@ def check_blob_exists(namespace_name, repo_name, digest):
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
     if blob is None:
         try:
-            proxy = setup_proxy(namespace_name, repo_name)
+            proxy, _ = setup_proxy(namespace_name, repo_name)
             resp = proxy.blob_exists(digest)
             return Response(**resp)
         except ProxyNotSupported as e:
@@ -99,7 +99,7 @@ def download_blob(namespace_name, repo_name, digest):
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
     if blob is None:
         try:
-            proxy = setup_proxy(namespace_name, repo_name)
+            proxy, _ = setup_proxy(namespace_name, repo_name)
             media_type = request.headers.get("Accept", None)
             resp = proxy.get_blob(digest, media_type)
             return Response(**resp)

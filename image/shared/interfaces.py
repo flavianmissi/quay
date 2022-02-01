@@ -191,7 +191,7 @@ class ManifestInterface(object):
 
 
 @add_metaclass(ABCMeta)
-class ManifestListInterface(object):
+class ManifestListInterface(ManifestInterface):
     """
     Defines the interface for the various manifest list types supported.
     """

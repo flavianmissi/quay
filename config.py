@@ -802,4 +802,4 @@ class DefaultConfig(ImmutableConfig):
     CLEAN_BLOB_UPLOAD_FOLDER = False
 
     # Feature Flag: Enables Quay to act as a pull through cache for upstream registries
-    FEATURE_PROXY_CACHE = False
+    FEATURE_PROXY_CACHE = True

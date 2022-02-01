@@ -10,7 +10,15 @@ class ProxyNotSupported(Exception):
     pass
 
 
-def _get_proxy_config(org_name: str) -> ProxyCacheConfig:
+def get_proxy_config(org_name: str) -> ProxyCacheConfig:
+    """
+    Returns a ProxyCacheConfig instance if org_name is set up as a proxy cache org.
+    Raises ProxyNotSupported exception if a user, or an org not set up as proxy
+    cache is given.
+
+    Proxy cache orgs are organizations (not users) that have a ProxyCacheConfig
+    object associated to them.
+    """
     if not app.config.get("FEATURE_PROXY_CACHE", False):
         raise ProxyNotSupported("Proxy globally disabled.")
 
@@ -23,16 +31,13 @@ def _get_proxy_config(org_name: str) -> ProxyCacheConfig:
         raise ProxyNotSupported("Organization is invalid or not configured as proxy cache.")
 
 
-def setup_proxy(org_name: str, repo: str) -> Proxy:
+# def setup_proxy(config: ProxyCacheConfig, repo: str) -> Proxy:
+def setup_proxy(org_name: str, repo: str) -> (Proxy, ProxyCacheConfig):
     """
-    Returns a proxy.Proxy instance if org_name is set up as a proxy cache org.
-    Raises ProxyNotSupported exception if a user, or an org not set up as proxy
-    cache is given.
+    Returns a proxy.Proxy instance set up for the given ProxyCacheConfig and repository.
+    """
 
-    Proxy cache orgs are organizations (not users) that have a ProxyCacheConfig
-    object associated to them.
-    """
-    config = _get_proxy_config(org_name)
+    config = get_proxy_config(org_name)
 
     # when Quay is set up to proxy a whole upstream registry, the
     # upstream_registry_namespace for the proxy cache config will be empty.
@@ -43,4 +48,4 @@ def setup_proxy(org_name: str, repo: str) -> Proxy:
         repo = f"{target_ns}/{repo}"
 
     proxy = Proxy(config, repo)
-    return proxy
+    return proxy, config

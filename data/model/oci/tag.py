@@ -53,6 +53,21 @@ def get_tag_by_id(tag_id):
         return None
 
 
+def get_tag_by_manifest_id(manifest_id):
+    """
+    Gets the tag with greatest lifetime_end_ms for the manifest with the given id,
+    regardless if the tag is alive or dead.
+
+    Retuns the tag if one exists, or None otherwise.
+    """
+    try:
+        # TODO: test with multiple existing temp tags
+        tag = Tag.select().where(Tag.manifest == manifest_id).order_by(-Tag.lifetime_end_ms).get()
+    except Tag.DoesNotExist:
+        return None
+    return tag
+
+
 def get_tag(repository_id, tag_name):
     """
     Returns the alive, non-hidden tag with the given name under the specified repository or None if

@@ -41,7 +41,7 @@ class RegistryDataInterface(object):
         """
 
     @abstractmethod
-    def lookup_repository(self, namespace_name, repo_name, kind_filter=None):
+    def lookup_repository(self, namespace_name, repo_name, kind_filter=None, raise_on_error=False):
         """
         Looks up and returns a reference to the repository with the given namespace and name, or
         None if none.
@@ -60,6 +60,7 @@ class RegistryDataInterface(object):
         manifest_digest,
         allow_dead=False,
         require_available=False,
+        raise_on_error=False,
     ):
         """
         Looks up the manifest with the given digest under the given repository and returns it or
@@ -192,7 +193,7 @@ class RegistryDataInterface(object):
         """
 
     @abstractmethod
-    def get_repo_tag(self, repository_ref, tag_name):
+    def get_repo_tag(self, repository_ref, tag_name, raise_on_error=False):
         """
         Returns the latest, *active* tag found in the repository, with the matching name or None if
         none.
@@ -311,6 +312,13 @@ class RegistryDataInterface(object):
         """
 
     @abstractmethod
+    def blob_exists(self, model_cache, namespace_name, repo_name, blob_digest):
+        """
+        Returns the blob if it exists in the given namespace, or None if either
+        the blob or repository don't exist.
+        """
+
+    @abstractmethod
     def create_blob_upload(self, repository_ref, upload_id, location_name, storage_metadata):
         """
         Creates a new blob upload and returns a reference.
@@ -392,6 +400,14 @@ class RegistryDataInterface(object):
         """
         Returns a cached set of ISO country codes blacklisted for pulls for the namespace or None if
         the list could not be loaded.
+        """
+
+    @abstractmethod
+    def get_cached_repo_blob(self, model_cache, namespace_name, repo_name, blob_digest):
+        """
+        Returns the blob in the repository with the given digest if any or None if none.
+
+        Caches the result in the caching system.
         """
 
     @abstractmethod

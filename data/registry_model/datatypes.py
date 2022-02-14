@@ -7,7 +7,7 @@ from enum import Enum, unique
 from cachetools.func import lru_cache
 
 from data import model
-from data.database import Manifest as ManifestTable
+from data.database import Manifest as ManifestTable, get_epoch_timestamp_ms
 from data.registry_model.datatype import datatype, requiresinput, optionalinput
 from image.shared import ManifestException
 from image.shared.schemas import parse_manifest_from_bytes, is_manifest_list_type
@@ -221,6 +221,12 @@ class Tag(
         if tag is None:
             return None
 
+        manifest = manifest_row
+        manifest_digest = manifest_row.digest if manifest_row else None
+        if manifest_row is None and tag.manifest is not None:
+            manifest = tag.manifest
+            manifest_digest = tag.manifest.digest
+
         return Tag(
             db_id=tag.id,
             name=tag.name,
@@ -229,14 +235,19 @@ class Tag(
             lifetime_end_ms=tag.lifetime_end_ms,
             lifetime_start_ts=tag.lifetime_start_ms // 1000,
             lifetime_end_ts=tag.lifetime_end_ms // 1000 if tag.lifetime_end_ms else None,
-            manifest_digest=manifest_row.digest if manifest_row else tag.manifest.digest,
+            manifest_digest=manifest_digest,
             inputs=dict(
                 legacy_id_handler=legacy_id_handler,
                 legacy_image_row=legacy_image_row,
-                manifest_row=manifest_row or tag.manifest,
+                manifest_row=manifest,
                 repository=RepositoryReference.for_id(tag.repository_id),
             ),
         )
+
+    @property
+    def expired(self):
+        now_ms = get_epoch_timestamp_ms()
+        return self.lifetime_end_ms is not None and self.lifetime_end_ms <= now_ms
 
     @property
     @requiresinput("manifest_row")
@@ -330,6 +341,13 @@ class Manifest(
         return parse_manifest_from_bytes(
             self.internal_manifest_bytes, self.media_type, validate=validate
         )
+
+    @property
+    def id(self):
+        """
+        The ID of this manifest.
+        """
+        return self._db_id
 
     @property
     def is_manifest_list(self):

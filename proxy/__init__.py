@@ -68,9 +68,12 @@ class Proxy:
             "headers": dict(resp.headers),
         }
 
-    def manifest_exists(self, image_ref):
+    def manifest_exists(self, image_ref, media_type=None):
         url = f"{self.base_url}/v2/{self._repo}/manifests/{image_ref}"
-        resp = self.head(url, allow_redirects=True)
+        headers = {}
+        if media_type is not None:
+            headers["Accept"] = media_type
+        resp = self.head(url, headers=headers, allow_redirects=True)
         return {
             "response": resp.text,
             "status": resp.status_code,
@@ -96,13 +99,8 @@ class Proxy:
                 "headers": dict(resp.headers),
             }
 
-        def stream_contents():
-            chunk = 1024
-            for chunk in resp.iter_content(chunk_size=chunk):
-                yield chunk
-
         return {
-            "response": stream_contents(),
+            "response": resp.content,
             "status": resp.status_code,
             "headers": dict(resp.headers),
         }

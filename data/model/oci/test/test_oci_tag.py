@@ -23,6 +23,7 @@ from data.model.oci.tag import (
     list_repository_tag_history,
     get_expired_tag,
     get_tag,
+    get_tag_by_manifest_id,
     delete_tag,
     delete_tags_for_manifest,
     change_tag_expiration,
@@ -132,6 +133,56 @@ def test_get_tag(initialized_db):
         found = True
 
     assert found
+
+
+def test_get_tag_by_manifest_id_tag_doesnt_exist(initialized_db):
+    tag = get_tag_by_manifest_id(9999)
+    assert tag is None
+
+
+def test_get_tag_by_manifest_id_valid_tag(initialized_db):
+    repo = model.repository.create_repository("devtable", "newrepo", None)
+    manifest, _ = create_manifest_for_testing(repo, "1")
+    tag = get_tag_by_manifest_id(manifest.id)
+    assert tag is not None
+
+
+def test_get_tag_by_manifest_id_expired_tag(initialized_db):
+    repo = model.repository.create_repository("devtable", "newrepo", None)
+    manifest, _ = create_manifest_for_testing(repo, "1")
+    before_ms = get_epoch_timestamp_ms() - timedelta(hours=24).total_seconds() * 1000
+    count = (
+        Tag.update(
+            lifetime_start_ms=before_ms,
+            lifetime_end_ms=before_ms + 5,
+        )
+        .where(Tag.manifest == manifest.id)
+        .execute()
+    )
+    assert count == 1
+    tag = get_tag_by_manifest_id(manifest.id)
+    assert tag is not None
+
+
+def test_get_tag_by_manifest_id_multiple_tags_returns_latest(initialized_db):
+    repo = model.repository.create_repository("devtable", "newrepo", None)
+    manifest, _ = create_manifest_for_testing(repo, "1")
+    before_ms = get_epoch_timestamp_ms() - timedelta(hours=24).total_seconds() * 1000
+    count = (
+        Tag.update(
+            lifetime_start_ms=before_ms,
+            lifetime_end_ms=before_ms + 5,
+        )
+        .where(Tag.manifest == manifest.id)
+        .execute()
+    )
+    assert count == 1
+    expired_tag = get_tag_by_manifest_id(manifest.id)
+    new_tag = create_temporary_tag_if_necessary(manifest, get_epoch_timestamp_ms() + 3600 * 1000)
+    tag = get_tag_by_manifest_id(manifest.id)
+    assert tag is not None
+    assert tag.id == new_tag.id
+    assert tag.lifetime_end_ms > expired_tag.lifetime_end_ms
 
 
 @pytest.mark.parametrize(

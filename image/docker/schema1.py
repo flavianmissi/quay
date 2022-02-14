@@ -373,6 +373,12 @@ class DockerSchema1Manifest(ManifestInterface):
             self._layers = list(self._generate_layers())
         return self._layers
 
+    @property
+    def filesystem_layers(self):
+        if self._layers is None:
+            self._layers = list(self._generate_layers())
+        return self._layers
+
     def get_layers(self, content_retriever):
         """
         Returns the layers of this manifest, from base to leaf or None if this kind of manifest does
@@ -399,6 +405,10 @@ class DockerSchema1Manifest(ManifestInterface):
                 created_datetime=created_datetime,
                 internal_layer=layer,
             )
+
+    @property
+    def is_image_manifest(self):
+        return True
 
     @property
     def blob_digests(self):

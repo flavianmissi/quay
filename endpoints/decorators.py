@@ -13,15 +13,55 @@ import features
 from app import app, ip_resolver, model_cache
 from auth.auth_context import get_authenticated_context, get_authenticated_user
 from data.database import RepositoryState
+from data.model import InvalidProxyCacheConfigException
 from data.model.repository import get_repository, get_repository_state
 from data.model.repo_mirror import get_mirroring_robot, get_mirror
 from data.registry_model import registry_model
+from data.registry_model.registry_proxy_model import ProxyModel
 from data.readreplica import ReadOnlyModeException
 from util.names import parse_namespace_repository, ImplicitLibraryNamespaceNotAllowed
 from util.http import abort
 from util.request import get_request_ip
 
 logger = logging.getLogger(__name__)
+
+
+def inject_registry_model(ref_kwarg_name):
+    """
+    Injects the correct registry model into the decorated view.
+
+    When the namespace is an org, and is configured for proxy cache, injects the
+    ProxyModel registry model.
+    When the namespace is a user or an org that is not configured for proxy cache,
+    injects the OCIModel registry model.
+
+    `ref_kwarg_name` is the kwarg name referencing the artifact, a tag or digest
+    (manifest_ref) in case of manifests, or a digest (digest) in case of a blob.
+    """
+
+    def inner(func):
+        @wraps(func)
+        def wrapper(namespace_name, repo_name, *args, **kwargs):
+            new_registry_model = registry_model
+            if features.PROXY_CACHE:
+                ref = kwargs[ref_kwarg_name]
+                try:
+                    new_registry_model = ProxyModel(
+                        namespace_name,
+                        repo_name,
+                        ref,
+                        request.headers.get("Accept", None),
+                        get_authenticated_user(),
+                    )
+                except InvalidProxyCacheConfigException as e:
+                    logger.debug(f"Skipping pull through proxy cache: {e}")
+
+            kwargs["registry_model"] = new_registry_model
+            return func(namespace_name, repo_name, *args, **kwargs)
+
+        return wrapper
+
+    return inner
 
 
 def parse_repository_name(

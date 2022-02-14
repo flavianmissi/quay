@@ -25,6 +25,7 @@ from endpoints.decorators import (
     parse_repository_name,
     check_region_blacklisted,
     check_readonly,
+    inject_registry_model,
 )
 from endpoints.metrics import image_pulled_bytes
 from endpoints.v2 import v2_bp, require_repo_read, require_repo_write, get_input_stream
@@ -38,7 +39,6 @@ from endpoints.v2.errors import (
     InvalidRequest,
     BlobDownloadGeoBlocked,
 )
-from endpoints.v2.proxy import setup_proxy, ProxyNotSupported
 from util.cache import cache_control
 from util.names import parse_namespace_repository
 from util.request import get_request_ip
@@ -59,16 +59,11 @@ BLOB_CONTENT_TYPE = "application/octet-stream"
 @require_repo_read
 @anon_allowed
 @cache_control(max_age=31436000)
-def check_blob_exists(namespace_name, repo_name, digest):
+@inject_registry_model(ref_kwarg_name="digest")
+def check_blob_exists(namespace_name, repo_name, digest, registry_model):
     # Find the blob.
-    blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
+    blob = registry_model.blob_exists(model_cache, namespace_name, repo_name, digest)
     if blob is None:
-        try:
-            proxy = setup_proxy(namespace_name, repo_name)
-            resp = proxy.blob_exists(digest)
-            return Response(**resp)
-        except ProxyNotSupported as e:
-            logger.debug(f"Skipping pull through proxy cache: {e}")
         raise BlobUnknown()
 
     # Build the response headers.
@@ -94,17 +89,11 @@ def check_blob_exists(namespace_name, repo_name, digest):
 @anon_allowed
 @check_region_blacklisted(BlobDownloadGeoBlocked)
 @cache_control(max_age=31536000)
-def download_blob(namespace_name, repo_name, digest):
+@inject_registry_model(ref_kwarg_name="digest")
+def download_blob(namespace_name, repo_name, digest, registry_model):
     # Find the blob.
     blob = registry_model.get_cached_repo_blob(model_cache, namespace_name, repo_name, digest)
     if blob is None:
-        try:
-            proxy = setup_proxy(namespace_name, repo_name)
-            media_type = request.headers.get("Accept", None)
-            resp = proxy.get_blob(digest, media_type)
-            return Response(**resp)
-        except ProxyNotSupported as e:
-            logger.debug(f"Skipping pull through proxy cache: {e}")
         raise BlobUnknown()
 
     # Build the response headers.

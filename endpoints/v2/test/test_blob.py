@@ -1,35 +1,219 @@
+import io
+import gzip
 import json
 import unittest
 import hashlib
 import pytest
+from unittest.mock import MagicMock, patch
 
 from mock import patch
 from flask import url_for
 from playhouse.test_utils import assert_query_count
 
-from app import instance_keys, app as realapp
+from app import instance_keys, app as realapp, storage
 from auth.auth_context_type import ValidatedAuthContext
 from data import model
-from data.cache import InMemoryDataModelCache
+from data.cache import InMemoryDataModelCache, NoopDataModelCache
 from data.cache.test.test_cache import TEST_CACHE_CONFIG
-from data.database import ImageStorageLocation
+from data.database import ImageStorageLocation, ManifestBlob, ImageStorage, ImageStoragePlacement
+from data.registry_model import registry_model
+from data.registry_model.registry_proxy_model import ProxyModel
+from data.model.storage import get_layer_path
 from endpoints.test.shared import conduct_call
+from image.docker.schema2 import DOCKER_SCHEMA2_MANIFEST_CONTENT_TYPE
+from image.shared.schemas import parse_manifest_from_bytes
+from proxy import Proxy
+from util.bytes import Bytes
 from util.security.registry_jwt import generate_bearer_token, build_context_and_subject
 from test.fixtures import *
+
+
+HELLO_WORLD_SCHEMA2_MANIFEST_JSON = r"""{
+   "schemaVersion": 2,
+   "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+   "config": {
+      "mediaType": "application/vnd.docker.container.image.v1+json",
+      "size": 1469,
+      "digest": "sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412"
+   },
+   "layers": [
+      {
+         "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+         "size": 2479,
+         "digest": "sha256:2db29710123e3e53a794f2694094b9b4338aa9ee5c40b930cb8063a1be392c54"
+      }
+   ]
+}"""
+
+
+class TestBlobPullThroughStorage:
+    orgname = "cache"
+    registry = "docker.io"
+    image_name = "library/postgres"
+    repository = f"{orgname}/{image_name}"
+    tag = "14"
+    digest = "sha256:2db29710123e3e53a794f2694094b9b4338aa9ee5c40b930cb8063a1be392c54"
+    config = None
+    org = None
+    manifest = None
+    repo_ref = None
+    blob = None
+
+    @pytest.fixture(autouse=True)
+    def setup(self, client, app):
+        self.client = client
+
+        self.user = model.user.get_user("devtable")
+        context, subject = build_context_and_subject(ValidatedAuthContext(user=self.user))
+        access = [
+            {
+                "type": "repository",
+                "name": self.repository,
+                "actions": ["pull"],
+            }
+        ]
+        token = generate_bearer_token(
+            realapp.config["SERVER_HOSTNAME"], subject, context, access, 600, instance_keys
+        )
+        self.headers = {
+            "Authorization": f"Bearer {token.decode('ascii')}",
+        }
+
+        if self.org is None:
+            self.org = model.organization.create_organization(
+                self.orgname, "{self.orgname}@devtable.com", self.user
+            )
+            self.org.save()
+            self.config = model.proxy_cache.create_proxy_cache_config(
+                org_name=self.orgname,
+                upstream_registry=self.registry,
+                expiration_s=3600,
+            )
+
+        if self.repo_ref is None:
+            r = model.repository.create_repository(self.orgname, self.image_name, self.user)
+            assert r is not None
+            self.repo_ref = registry_model.lookup_repository(self.orgname, self.image_name)
+            assert self.repo_ref is not None
+
+        if self.manifest is None:
+            parsed = parse_manifest_from_bytes(
+                Bytes.for_string_or_unicode(HELLO_WORLD_SCHEMA2_MANIFEST_JSON),
+                DOCKER_SCHEMA2_MANIFEST_CONTENT_TYPE,
+            )
+            proxy_mock = MagicMock()
+            proxy_mock.manifest_exists.return_value = {
+                "status": 200,
+                "headers": {"docker-content-digest": parsed.digest},
+            }
+            proxy_mock.get_manifest.return_value = {
+                "status": 200,
+                "response": HELLO_WORLD_SCHEMA2_MANIFEST_JSON,
+                "headers": {"content-type": DOCKER_SCHEMA2_MANIFEST_CONTENT_TYPE},
+            }
+            proxy_mock.blob_exists.return_value = {"status": 200}
+            proxy_mock.get_blob.return_value = {
+                "status": 200,
+                "response": b"test",
+                "headers": {"content-type": ""},
+            }
+            with patch(
+                "data.registry_model.registry_proxy_model.Proxy", MagicMock(return_value=proxy_mock)
+            ):
+                proxy_model = ProxyModel(
+                    self.orgname,
+                    self.image_name,
+                    self.tag,
+                    DOCKER_SCHEMA2_MANIFEST_CONTENT_TYPE,
+                    self.user,
+                )
+                tag = proxy_model.get_repo_tag(self.repo_ref, self.tag)
+                self.manifest = tag.manifest
+            assert self.manifest is not None
+
+        if self.blob is None:
+            self.blob = ImageStorage.filter(ImageStorage.content_checksum == self.digest).get()
+
+    def test_create_blob_placement_on_first_time_download(self):
+        proxy_mock = MagicMock()
+        proxy_mock.blob_exists.return_value = {"status": 200}
+        proxy_mock.get_blob.return_value = {
+            "status": 200,
+            "response": b"test",
+            "headers": {"content-type": ""},
+        }
+
+        params = {
+            "repository": self.repository,
+            "digest": self.digest,
+        }
+
+        with patch(
+            "data.registry_model.registry_proxy_model.Proxy", MagicMock(return_value=proxy_mock)
+        ):
+            with patch("endpoints.v2.blob.model_cache", NoopDataModelCache(TEST_CACHE_CONFIG)):
+                conduct_call(
+                    self.client,
+                    "v2.download_blob",
+                    url_for,
+                    "GET",
+                    params,
+                    expected_code=200,
+                    headers=self.headers,
+                )
+        placements = ImageStoragePlacement.filter(ImageStoragePlacement.storage == self.blob)
+        assert placements.count() == 1
+
+    def test_store_blob_on_first_time_download(self):
+        proxy_mock = MagicMock()
+        proxy_mock.blob_exists.return_value = {"status": 200}
+        proxy_mock.get_blob.return_value = {
+            "status": 200,
+            "response": b"test",
+            "headers": {"content-type": ""},
+        }
+
+        params = {
+            "repository": self.repository,
+            "digest": self.digest,
+        }
+
+        with patch(
+            "data.registry_model.registry_proxy_model.Proxy", MagicMock(return_value=proxy_mock)
+        ):
+            with patch("endpoints.v2.blob.model_cache", NoopDataModelCache(TEST_CACHE_CONFIG)):
+                conduct_call(
+                    self.client,
+                    "v2.download_blob",
+                    url_for,
+                    "GET",
+                    params,
+                    expected_code=200,
+                    headers=self.headers,
+                )
+
+        path = get_layer_path(self.blob)
+        assert path is not None
+
+        placements = ImageStoragePlacement.filter(ImageStoragePlacement.storage == self.blob)
+        locations = [placements.get().location.name]
+        assert storage.exists(locations, path), f"blob not found in storage at path {path}"
 
 
 @pytest.mark.e2e
 class TestBlobPullThroughProxy(unittest.TestCase):
     org = "cache"
     registry = "docker.io"
-    repository = f"{org}/library/postgres"
+    image_name = "library/postgres"
+    repository = f"{org}/{image_name}"
     tag = "14"
-    _blob_digest = None
+    config = None
+    blob_digest = None
+    repo_ref = None
 
     @pytest.fixture(autouse=True)
     def setup(self, client, app):
         self.client = client
-        realapp.config.update({"FEATURE_PROXY_CACHE": True})
 
         self.user = model.user.get_user("devtable")
         context, subject = build_context_and_subject(ValidatedAuthContext(user=self.user))
@@ -53,40 +237,30 @@ class TestBlobPullThroughProxy(unittest.TestCase):
             org = model.organization.create_organization(self.org, "cache@devtable.com", self.user)
             org.save()
 
-        try:
-            model.proxy_cache.get_proxy_cache_config_for_org(self.org)
-        except Exception:
-            model.proxy_cache.create_proxy_cache_config(
+        if self.config is None:
+            self.config = model.proxy_cache.create_proxy_cache_config(
                 org_name=self.org,
                 upstream_registry=self.registry,
-                staleness_period_s=3600,
+                expiration_s=3600,
             )
 
-    def _get_blob_digest(self) -> str:
-        if self._blob_digest is not None:
-            return self._blob_digest
+        if self.repo_ref is None:
+            r = model.repository.create_repository(self.org, self.image_name, self.user)
+            assert r is not None
+            self.repo_ref = registry_model.lookup_repository(self.org, self.image_name)
+            assert self.repo_ref is not None
 
-        params = {
-            "repository": self.repository,
-            "manifest_ref": self.tag,
-        }
-        resp = conduct_call(
-            self.client,
-            "v2.fetch_manifest_by_tagname",
-            url_for,
-            "GET",
-            params,
-            expected_code=200,
-            headers=self.headers,
-        )
-        manifest = json.loads(resp.response[0])
-        self._blob_digest = manifest["fsLayers"][0]["blobSum"]
-        return self._blob_digest
+        if self.blob_digest is None:
+            proxy_model = ProxyModel(
+                self.org, self.image_name, self.tag, DOCKER_SCHEMA2_MANIFEST_CONTENT_TYPE, self.user
+            )
+            tag = proxy_model.get_repo_tag(self.repo_ref, self.tag)
+            self.blob_digest = tag.manifest.get_parsed_manifest().blob_digests[0]
 
     def test_pull_from_dockerhub(self):
         params = {
             "repository": self.repository,
-            "digest": self._get_blob_digest(),
+            "digest": self.blob_digest,
         }
         conduct_call(
             self.client,
@@ -117,7 +291,7 @@ class TestBlobPullThroughProxy(unittest.TestCase):
     def test_check_blob_exists_from_dockerhub(self):
         params = {
             "repository": self.repository,
-            "digest": self._get_blob_digest(),
+            "digest": self.blob_digest,
         }
         conduct_call(
             self.client,
@@ -153,6 +327,7 @@ class TestBlobPullThroughProxy(unittest.TestCase):
         ("HEAD", "check_blob_exists"),
     ],
 )
+@patch("endpoints.v2.blob.model_cache", InMemoryDataModelCache(TEST_CACHE_CONFIG))
 def test_blob_caching(method, endpoint, client, app):
     digest = "sha256:" + hashlib.sha256(b"a").hexdigest()
     location = ImageStorageLocation.get(name="local_us")
@@ -187,12 +362,15 @@ def test_blob_caching(method, endpoint, client, app):
     conduct_call(
         client, "v2." + endpoint, url_for, method, params, expected_code=200, headers=headers
     )
-    with patch("endpoints.v2.blob.model_cache", InMemoryDataModelCache(TEST_CACHE_CONFIG)):
-        # First request should make a DB query to retrieve the blob.
-        conduct_call(
-            client, "v2." + endpoint, url_for, method, params, expected_code=200, headers=headers
-        )
+    # First request should make a DB query to retrieve the blob.
+    conduct_call(
+        client, "v2." + endpoint, url_for, method, params, expected_code=200, headers=headers
+    )
 
+    # turn off pull-thru proxy cache. it adds an extra query to the pull operation
+    # for checking whether the namespace is a cache org or not before retrieving
+    # the blob.
+    with patch("endpoints.decorators.features.PROXY_CACHE", False):
         # Subsequent requests should use the cached blob.
         with assert_query_count(0):
             conduct_call(

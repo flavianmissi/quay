@@ -7,7 +7,7 @@ from peewee import fn
 from data import database
 from data import model
 from data.cache import cache_key
-from data.model import oci, DataModelException
+from data.model import oci, DataModelException, RepositoryDoesNotExist, ManifestDoesNotExist
 from data.model.oci.retriever import RepositoryContentRetriever
 from data.readreplica import ReadOnlyModeException
 from data.database import (
@@ -148,6 +148,7 @@ class OCIModel(RegistryDataInterface):
         manifest_digest,
         allow_dead=False,
         require_available=False,
+        raise_on_error=False,
     ):
         """
         Looks up the manifest with the given digest under the given repository and returns it or
@@ -160,6 +161,8 @@ class OCIModel(RegistryDataInterface):
             require_available=require_available,
         )
         if manifest is None:
+            if raise_on_error:
+                raise ManifestDoesNotExist()
             return None
 
         return Manifest.for_manifest(manifest, self._legacy_image_id_handler)
@@ -321,7 +324,7 @@ class OCIModel(RegistryDataInterface):
 
         return {repo_id: toSeconds(ms) for repo_id, ms in list(last_modified.items())}
 
-    def get_repo_tag(self, repository_ref, tag_name):
+    def get_repo_tag(self, repository_ref, tag_name, raise_on_error=False):
         """
         Returns the latest, *active* tag found in the repository, with the matching name or None if
         none.
@@ -330,6 +333,8 @@ class OCIModel(RegistryDataInterface):
 
         tag = oci.tag.get_tag(repository_ref._db_id, tag_name)
         if tag is None:
+            if raise_on_error:
+                raise model.TagDoesNotExist()
             return None
 
         return Tag.for_tag(tag, self._legacy_image_id_handler)
@@ -717,18 +722,23 @@ class OCIModel(RegistryDataInterface):
 
         return RepositoryReference.for_repo_obj(repo)
 
-    def lookup_repository(self, namespace_name, repo_name, kind_filter=None):
+    def lookup_repository(self, namespace_name, repo_name, kind_filter=None, raise_on_error=False):
         """
         Looks up and returns a reference to the repository with the given namespace and name, or
         None if none.
         """
         repo = model.repository.get_repository(namespace_name, repo_name, kind_filter=kind_filter)
-        state = repo.state if repo is not None else None
+        if repo is None:
+            if raise_on_error:
+                raise RepositoryDoesNotExist()
+            return None
+
+        state = repo.state
         return RepositoryReference.for_repo_obj(
             repo,
             namespace_name,
             repo_name,
-            repo.namespace_user.stripe_id is None if repo else None,
+            repo.namespace_user.stripe_id is None,
             state=state,
         )
 
@@ -792,6 +802,15 @@ class OCIModel(RegistryDataInterface):
             return None
 
         return set(result)
+
+    def blob_exists(self, model_cache, namespace_name, repo_name, blob_digest):
+        """
+        Returns the blob if it exists in the given namespace, or None if either
+        the blob or repository don't exist.
+
+        Caches the blob if found.
+        """
+        return self.get_cached_repo_blob(model_cache, namespace_name, repo_name, blob_digest)
 
     def get_cached_repo_blob(self, model_cache, namespace_name, repo_name, blob_digest):
         """

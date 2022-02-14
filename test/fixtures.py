@@ -15,6 +15,7 @@ from flask_mail import Mail
 from peewee import SqliteDatabase, InternalError
 from mock import patch
 
+import features
 from app import app as application
 from auth.permissions import on_identity_loaded
 from data import model
@@ -333,8 +334,10 @@ def app(appconfig, initialized_db):
     app.register_blueprint(webhooks, url_prefix="/webhooks")
 
     app.config.update(appconfig)
+    features.import_features(app.config)
 
     Userfiles(app)
     Mail(app)
 
-    return app
+    with app.app_context():
+        yield app

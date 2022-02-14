@@ -22,7 +22,7 @@ def upgrade(op, tables, tester):
         sa.Column("upstream_registry", sa.String(length=2048), nullable=False),
         sa.Column("upstream_registry_username", sa.String(length=2048), nullable=True),
         sa.Column("upstream_registry_password", sa.String(length=2048), nullable=True),
-        sa.Column("staleness_period_s", sa.Integer(), server_default="0"),
+        sa.Column("expiration_s", sa.Integer(), server_default="0"),
         sa.Column(
             "insecure", sa.Boolean(), nullable=False, server_default=sa.sql.expression.false()
         ),

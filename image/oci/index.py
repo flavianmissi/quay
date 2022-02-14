@@ -214,6 +214,13 @@ class OCIIndex(ManifestListInterface):
     def bytes(self):
         return self._manifest_bytes
 
+    @property
+    def filesystem_layers(self):
+        """
+        Returns the file system layers of this manifest, from base to leaf.
+        """
+        return None
+
     def get_layers(self, content_retriever):
         """
         Returns the layers of this manifest, from base to leaf or None if this kind of manifest does

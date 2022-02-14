@@ -63,30 +63,6 @@ def test_lookup_manifest_dead_tag(initialized_db):
     )
 
 
-def create_manifest_for_testing(repository, differentiation_field="1"):
-    # Populate a manifest.
-    layer_json = json.dumps(
-        {
-            "config": {},
-            "rootfs": {"type": "layers", "diff_ids": []},
-            "history": [],
-        }
-    )
-
-    # Add a blob containing the config.
-    _, config_digest = _populate_blob(layer_json)
-
-    remote_digest = sha256_digest("something")
-    builder = DockerSchema2ManifestBuilder()
-    builder.set_config_digest(config_digest, len(layer_json.encode("utf-8")))
-    builder.add_layer(remote_digest, 1234, urls=["http://hello/world" + differentiation_field])
-    manifest = builder.build()
-
-    created = get_or_create_manifest(repository, manifest, storage)
-    assert created
-    return created.manifest, manifest
-
-
 def test_lookup_manifest_child_tag(initialized_db):
     repository = create_repository("devtable", "newrepo", None)
     manifest, manifest_impl = create_manifest_for_testing(repository)
@@ -641,3 +617,17 @@ def test_create_manifest_cannot_load_config_blob(initialized_db):
         get_or_create_manifest(
             repository, manifest, storage, retriever=broken_retriever, raise_on_error=True
         )
+
+
+# def test_create_sparse_manifest(initialized_db):
+#     layer_json = json.dumps(
+#         {
+#             "config": {},
+#             "rootfs": {"type": "layers", "diff_ids": []},
+#             "history": [],
+#         }
+#     )
+#     builder.set_config_digest(config_digest, len(layer_json.encode("utf-8")))
+#     builder.add_layer(sha256_digest(b"something"), 1234)
+#     builder.add_layer(sha256_digest(b"another something"), 4567)
+#     manifest = builder.build()

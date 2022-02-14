@@ -18,6 +18,7 @@ from auth.permissions import (
     AdministerRepositoryPermission,
 )
 from auth.registry_jwt_auth import process_registry_jwt_auth, get_auth_headers
+from data.model import RepositoryDoesNotExist
 from data.registry_model import registry_model
 from data.readreplica import ReadOnlyModeException
 from endpoints.decorators import anon_protect, anon_allowed, route_show_if
@@ -127,8 +128,12 @@ def _require_repo_permission(permission_class, scopes=None, allow_public=False):
 
             repository = namespace_name + "/" + repo_name
             if allow_public:
-                repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
-                if repository_ref is None or not repository_ref.is_public:
+                try:
+                    repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
+                except RepositoryDoesNotExist:
+                    raise Unauthorized(repository=repository, scopes=scopes)
+
+                if not repository_ref.is_public:
                     raise Unauthorized(repository=repository, scopes=scopes)
 
                 if repository_ref.kind != "image":

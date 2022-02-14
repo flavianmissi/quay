@@ -45,6 +45,10 @@ class InvalidUsernameException(DataModelException):
     pass
 
 
+class RepositoryDoesNotExist(DataModelException):
+    pass
+
+
 class InvalidRepositoryBuildException(DataModelException):
     pass
 
@@ -81,6 +85,10 @@ class InvalidManifestException(DataModelException):
     pass
 
 
+class ManifestDoesNotExist(DataModelException):
+    pass
+
+
 class ServiceKeyDoesNotExist(DataModelException):
     pass
 
@@ -90,6 +98,10 @@ class ServiceKeyAlreadyApproved(DataModelException):
 
 
 class ServiceNameInvalid(DataModelException):
+    pass
+
+
+class TagDoesNotExist(DataModelException):
     pass
 
 

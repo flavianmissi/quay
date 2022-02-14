@@ -72,6 +72,14 @@ class ManifestInterface(object):
         pass
 
     @abstractmethod
+    def filesystem_layers(self, content_retriever):
+        """
+        Returns the file system layers of this manifest, from base to leaf or None if this kind of manifest does
+        not support layers.
+        """
+        pass
+
+    @abstractmethod
     def get_layers(self, content_retriever):
         """
         Returns the layers of this manifest, from base to leaf or None if this kind of manifest does
@@ -191,7 +199,7 @@ class ManifestInterface(object):
 
 
 @add_metaclass(ABCMeta)
-class ManifestListInterface(object):
+class ManifestListInterface(ManifestInterface):
     """
     Defines the interface for the various manifest list types supported.
     """

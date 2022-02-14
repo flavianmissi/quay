@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_CONNECT_TIMEOUT = 10  # seconds
 
-DEFAULT_PROXY_CACHE_STALENESS_PERIOD = 0  # seconds
+DEFAULT_PROXY_CACHE_EXPIRATION = 10800  # 3 hours (in seconds)
 
 
 # IMAGE_NOT_SCANNED_ENGINE_VERSION is the version found in security_indexed_engine when the
@@ -2062,7 +2062,7 @@ class ProxyCacheConfig(BaseModel):
     upstream_registry = CharField(max_length=270)
     upstream_registry_username = EncryptedCharField(max_length=2048, null=True)
     upstream_registry_password = EncryptedCharField(max_length=2048, null=True)
-    staleness_period_s = IntegerField(default=DEFAULT_PROXY_CACHE_STALENESS_PERIOD)
+    expiration_s = IntegerField(default=DEFAULT_PROXY_CACHE_EXPIRATION)
     insecure = BooleanField(default=False)
 
     @property
